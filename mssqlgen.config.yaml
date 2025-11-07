@@ -1,0 +1,47 @@
+# MSSQL to StepZen Schema Generator Configuration
+
+database:
+  server: localhost
+  database: WideWorldImporters
+  user: sa
+  password: ${DB_PASSWORD}  # Use environment variable
+  port: 1433
+  options:
+    encrypt: true
+    trustServerCertificate: true
+
+generation:
+  outputDir: ./stepzen
+  
+  # Optional: Specify which tables to generate schemas for
+  # Use schema-qualified names (schema.table) with wildcard support
+  # If empty or omitted, all tables from all non-system schemas are included
+  tables:
+    # Examples:
+    # - "Sales.*"              # All tables from Sales schema
+    # - "Warehouse.*"          # All tables from Warehouse schema  
+    # - "Sales.Customer"       # Specific table from specific schema
+    # - "*.Orders"             # Orders table from any schema
+    # - "Production.Product*"  # Product* tables from Production schema
+    - Sales.Customers
+    - Sales.Orders
+    - Sales.OrderLines
+    - Warehouse.StockItems
+    - Application.Cities
+    - Application.StateProvinces
+    - Application.Countries
+    - Application.DeliveryMethods
+    - Application.PaymentMethods
+    #- Sales.Invoices
+    #- Sales.InvoiceLines  
+  # Optional: Naming conventions for generated types
+  naming:
+    typePrefix: ""
+    typeSuffix: ""
+    fieldCase: camelCase  # Options: camelCase, snake_case, PascalCase
+  
+  # Optional: Feature flags for future enhancements
+  features:
+    generateMutations: true
+    generateRelationships: true
+    includePagination: false

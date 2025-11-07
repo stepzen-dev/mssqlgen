@@ -1,0 +1,35 @@
+# Example MSSQL to StepZen Schema Generator Configuration
+
+database:
+  server: localhost
+  database: AdventureWorks
+  user: sa
+  password: ${DB_PASSWORD}  # Use environment variable for security
+  port: 1433
+  options:
+    encrypt: true
+    trustServerCertificate: true
+    connectionTimeout: 30000
+    requestTimeout: 30000
+
+generation:
+  outputDir: ./stepzen
+  
+  # Optional: Specify which tables to generate schemas for
+  # Use schema-qualified names with wildcard support
+  tables:
+    - "Sales.*"              # All tables from Sales schema
+    - "Production.Product*"  # Product* tables from Production
+    - "dbo.Customer"         # Specific table from dbo schema
+  
+  # Optional: Naming conventions
+  naming:
+    typePrefix: ""
+    typeSuffix: ""
+    fieldCase: camelCase  # Options: camelCase, snake_case, PascalCase
+  
+  # Optional: Feature flags
+  features:
+    generateMutations: true
+    generateRelationships: true
+    includePagination: false
