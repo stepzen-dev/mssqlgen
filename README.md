@@ -1,17 +1,18 @@
 # MSSQL to StepZen Schema Generator
 
-A powerful CLI utility that automatically generates StepZen GraphQL schemas from Microsoft SQL Server databases. Connect to your MSSQL database, introspect the schema, and generate production-ready GraphQL types, queries, and StepZen configuration files.
+A powerful CLI utility that automatically generates StepZen GraphQL schemas from Microsoft SQL Server databases. Connect to your MSSQL database, introspect the schema, and generate production-ready GraphQL types, queries, and StepZen configuration files with automatic foreign key relationship handling.
 
 ## Features
 
 - 🔌 **Easy Database Connection** - Connect to MSSQL with simple configuration
 - 🔍 **Automatic Schema Introspection** - Discovers tables, columns, types, and relationships
 - 🎯 **Smart Type Mapping** - Converts SQL Server types to appropriate GraphQL types
+- 🔗 **Foreign Key Relationships** - Automatically generates @materializer directives for related data
 - 📝 **StepZen Integration** - Generates ready-to-use StepZen schemas with @dbquery directives
 - 🎨 **Flexible Configuration** - YAML config files or environment variables
 - 🚀 **Multiple Modes** - Interactive, CLI, or config-file driven
 - 🔐 **Secure** - Environment variable support for sensitive credentials
-- 🎛️ **Table Filtering** - Include/exclude specific tables with patterns
+- 🎛️ **Table Filtering** - Include specific tables with schema-qualified patterns
 - 📦 **Batch Processing** - Process multiple tables efficiently
 
 ## Installation
@@ -58,6 +59,10 @@ database:
 
 generation:
   outputDir: ./stepzen
+  tables:
+    - "dbo.*"              # Include all tables in dbo schema
+    - "Sales.Customer"     # Include specific table
+    - "Sales.Order*"       # Include tables matching pattern
 ```
 
 Create a `.env` file:
@@ -72,7 +77,13 @@ DB_PASSWORD=your_secure_password
 mssqlgen test
 ```
 
-### 4. Generate Schema
+### 4. List Available Schemas
+
+```bash
+mssqlgen list-schemas
+```
+
+### 5. Generate Schema
 
 ```bash
 mssqlgen generate
@@ -97,7 +108,7 @@ mssqlgen generate \
   --output ./stepzen
 
 # Generate specific tables only
-mssqlgen generate --tables Customer,Order,Product
+mssqlgen generate --tables "Sales.*,dbo.Customer"
 
 # Dry run (preview without writing files)
 mssqlgen generate --dry-run
@@ -133,6 +144,16 @@ mssqlgen list
 mssqlgen list --config my-config.yaml
 ```
 
+#### `list-schemas` - List Database Schemas
+
+```bash
+# List all schemas in the database
+mssqlgen list-schemas
+
+# List using specific config
+mssqlgen list-schemas --config my-config.yaml
+```
+
 #### `interactive` - Interactive Mode
 
 ```bash
@@ -163,14 +184,16 @@ database:
 generation:
   outputDir: ./stepzen      # Output directory
   
+  # Table filtering with schema-qualified patterns
   tables:
-    include:                # Tables to include (optional)
-      - "Customer"
-      - "Order*"           # Supports wildcards
-    exclude:                # Tables to exclude (optional)
-      - "sysdiagrams"
-      - "sys*"
-      - "__*"
+    - "dbo.*"               # All tables in dbo schema
+    - "Sales.*"             # All tables in Sales schema
+    - "*.Customer"          # Customer table in any schema
+    - "Sales.Order*"        # Tables starting with Order in Sales schema
+    - "Application.People"  # Specific table
+  
+  # Feature flags
+  autoIncludeForeignKeyTables: true  # Auto-include FK referenced tables
   
   naming:
     typePrefix: ""          # Prefix for type names
@@ -179,9 +202,23 @@ generation:
   
   features:
     generateMutations: true        # Generate mutations (future)
-    generateRelationships: true    # Generate relationships (future)
+    generateRelationships: true    # Generate relationships with @materializer
     includePagination: false       # Include pagination (future)
 ```
+
+### Table Filtering
+
+The `tables` array supports schema-qualified patterns:
+
+- `"dbo.*"` - All tables in the `dbo` schema
+- `"Sales.*"` - All tables in the `Sales` schema
+- `"*.Customer"` - Table named `Customer` in any schema
+- `"Sales.Order*"` - Tables starting with `Order` in `Sales` schema
+- `"Application.People"` - Specific table with schema
+
+**Auto-Include Foreign Key Tables:**
+
+When `autoIncludeForeignKeyTables: true`, the generator automatically includes tables that are referenced by foreign keys, even if they don't match your table patterns. This ensures complete relationship graphs.
 
 ### Environment Variables
 
@@ -222,20 +259,23 @@ stepzen/
 **types/customer.graphql:**
 
 ```graphql
-"""Type for dbo.Customer table"""
 type Customer {
-  """Primary Key, Auto-increment"""
   customerId: Int!
   firstName: String!
   lastName: String!
   email: String
   createdAt: String!
+  orders: [Order]
+    @materializer(
+      query: "ordersByCustomerId"
+      arguments: [{ name: "customerId", field: "customerId" }]
+    )
 }
 
 type Query {
   customers: [Customer]
     @dbquery(
-      type: "mydb"
+      type: "mssql"
       query: """
         SELECT * FROM dbo.Customer
       """
@@ -244,14 +284,106 @@ type Query {
   
   customer(customerId: Int!): Customer
     @dbquery(
-      type: "mydb"
+      type: "mssql"
       query: """
-        SELECT * FROM dbo.Customer WHERE CustomerId = @customerId
+        SELECT * FROM dbo.Customer WHERE CustomerId = ?
       """
       configuration: "mssql_config"
     )
 }
 ```
+
+**types/order.graphql:**
+
+```graphql
+type Order {
+  orderId: Int!
+  customerId: Int!
+  orderDate: String!
+  totalAmount: Float
+  customer: Customer
+    @materializer(
+      query: "customer"
+      arguments: [{ name: "customerId", field: "customerId" }]
+    )
+}
+
+type Query {
+  orders: [Order]
+    @dbquery(
+      type: "mssql"
+      query: """
+        SELECT * FROM dbo.Order
+      """
+      configuration: "mssql_config"
+    )
+  
+  order(orderId: Int!): Order
+    @dbquery(
+      type: "mssql"
+      query: """
+        SELECT * FROM dbo.Order WHERE OrderId = ?
+      """
+      configuration: "mssql_config"
+    )
+  
+  ordersByCustomerId(customerId: Int!): [Order]
+    @dbquery(
+      type: "mssql"
+      query: """
+        SELECT * FROM dbo.Order WHERE CustomerId = ?
+      """
+      configuration: "mssql_config"
+    )
+}
+```
+
+## Foreign Key Relationships
+
+The generator automatically detects foreign key relationships and creates:
+
+1. **@materializer directives** - Links related types together
+2. **Relationship queries** - Queries to fetch related data (e.g., `ordersByCustomerId`)
+3. **Bidirectional relationships** - Both parent-to-child and child-to-parent
+
+### How It Works
+
+When a foreign key is detected (e.g., `Order.CustomerId` → `Customer.CustomerId`):
+
+1. **Child Type** (`Order`) gets a field pointing to parent:
+   ```graphql
+   customer: Customer
+     @materializer(
+       query: "customer"
+       arguments: [{ name: "customerId", field: "customerId" }]
+     )
+   ```
+
+2. **Parent Type** (`Customer`) gets a field for children:
+   ```graphql
+   orders: [Order]
+     @materializer(
+       query: "ordersByCustomerId"
+       arguments: [{ name: "customerId", field: "customerId" }]
+     )
+   ```
+
+3. **Relationship Query** is generated:
+   ```graphql
+   ordersByCustomerId(customerId: Int!): [Order]
+     @dbquery(
+       type: "mssql"
+       query: "SELECT * FROM dbo.Order WHERE CustomerId = ?"
+       configuration: "mssql_config"
+     )
+   ```
+
+### Benefits
+
+- **Automatic Graph Traversal** - Navigate relationships naturally in GraphQL
+- **Efficient Queries** - StepZen handles the data fetching
+- **Type Safety** - Relationships are strongly typed
+- **No Manual Configuration** - Everything is generated from database metadata
 
 ## Type Mapping
 
@@ -295,8 +427,11 @@ npm run format
 # Generate schema for entire database
 mssqlgen generate
 
-# Generate for specific tables
-mssqlgen generate --tables Customer,Order,Product
+# Generate for specific schemas
+mssqlgen generate --tables "Sales.*,Application.*"
+
+# Generate specific tables
+mssqlgen generate --tables "dbo.Customer,dbo.Order"
 
 # Preview without writing files
 mssqlgen generate --dry-run
@@ -382,9 +517,10 @@ jobs:
 **Problem:** No tables found
 
 **Solutions:**
-- Check table filters in configuration
+- Check table patterns in configuration (use schema-qualified patterns like "dbo.*")
 - Verify user has permissions to read schema
 - Ensure you're connecting to the correct database
+- Use `list-schemas` command to see available schemas
 
 ## Roadmap
 
@@ -395,11 +531,12 @@ jobs:
 - [x] Query generation
 - [x] CLI interface
 
-### Phase 2 - Enhanced
-- [ ] Foreign key relationships
-- [ ] @materializer directives
+### Phase 2 - Enhanced ✅
+- [x] Foreign key relationships
+- [x] @materializer directives
+- [x] Schema-qualified table filtering
+- [x] Auto-include FK referenced tables
 - [ ] View support
-- [ ] Advanced filtering
 - [ ] Custom naming conventions
 
 ### Phase 3 - Advanced

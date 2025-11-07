@@ -23,6 +23,7 @@ export interface GenerationConfig {
   features?: {
     generateMutations?: boolean;
     generateRelationships?: boolean;
+    autoIncludeForeignKeyTables?: boolean;
     includePagination?: boolean;
   };
 }

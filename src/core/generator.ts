@@ -33,7 +33,14 @@ export class MSSQLSchemaGenerator {
       spinner.succeed(`Found ${allTables.length} tables`);
 
       // Filter tables based on config patterns
-      const filteredTables = this.filterTables(allTables);
+      let filteredTables = this.filterTables(allTables);
+      
+      // Auto-include foreign key tables if enabled
+      if (this.config.generation.features?.generateRelationships && 
+          this.config.generation.features?.autoIncludeForeignKeyTables) {
+        filteredTables = await this.autoIncludeForeignKeyTables(filteredTables, allTables);
+      }
+      
       console.log(chalk.blue(`Processing ${filteredTables.length} tables`));
 
       // Clean output directory
@@ -42,6 +49,7 @@ export class MSSQLSchemaGenerator {
       }
 
       const processedTables: string[] = [];
+      const processedTableSet = new Set<string>();
 
       // Process each table
       for (const tableName of filteredTables) {
@@ -56,8 +64,15 @@ export class MSSQLSchemaGenerator {
           // Get table information
           const tableInfo = await this.db.getTableInfo(table, schema);
 
-          // Generate GraphQL type
-          const graphqlType = this.schemaGen.generateType(tableInfo);
+          // Check for missing FK references and warn
+          if (this.config.generation.features?.generateRelationships && 
+              !this.config.generation.features?.autoIncludeForeignKeyTables) {
+            this.warnMissingForeignKeyTables(tableInfo, processedTableSet, filteredTables);
+          }
+
+          // Generate GraphQL type with relationships
+          const generateRelationships = this.config.generation.features?.generateRelationships ?? false;
+          const graphqlType = this.schemaGen.generateType(tableInfo, generateRelationships);
 
           // Generate queries
           const queries = this.schemaGen.generateQueries(
@@ -69,7 +84,8 @@ export class MSSQLSchemaGenerator {
           const schemaContent = this.schemaGen.generateSchemaFile(
             graphqlType,
             queries,
-            this.config.database.database
+            this.config.database.database,
+            generateRelationships ? tableInfo.foreignKeys : []
           );
 
           // Write schema file
@@ -81,6 +97,7 @@ export class MSSQLSchemaGenerator {
           );
 
           processedTables.push(tableName);
+          processedTableSet.add(tableName);
           spinner.succeed(`Processed: ${tableName}`);
         } catch (error) {
           spinner.fail(`Failed to process ${tableName}: ${error}`);
@@ -175,6 +192,72 @@ export class MSSQLSchemaGenerator {
     );
 
     return filtered.map(t => t.fullName);
+  }
+
+  /**
+   * Auto-includes tables referenced by foreign keys
+   */
+  private async autoIncludeForeignKeyTables(
+    filteredTables: string[],
+    allTables: Array<{ schema: string; table: string; fullName: string }>
+  ): Promise<string[]> {
+    const tablesToProcess = new Set(filteredTables);
+    const processed = new Set<string>();
+    const queue = [...filteredTables];
+
+    while (queue.length > 0) {
+      const tableName = queue.shift()!;
+      if (processed.has(tableName)) continue;
+      processed.add(tableName);
+
+      const [schema, table] = tableName.includes('.') 
+        ? tableName.split('.') 
+        : ['dbo', tableName];
+
+      try {
+        const tableInfo = await this.db.getTableInfo(table, schema);
+        
+        for (const fk of tableInfo.foreignKeys) {
+          const referencedFullName = `${schema}.${fk.referencedTable}`;
+          
+          if (!tablesToProcess.has(referencedFullName)) {
+            // Check if the referenced table exists in the database
+            const exists = allTables.some(t => t.fullName === referencedFullName);
+            if (exists) {
+              tablesToProcess.add(referencedFullName);
+              queue.push(referencedFullName);
+              console.log(chalk.cyan(`  ℹ Auto-added ${referencedFullName} (referenced by ${tableName})`));
+            }
+          }
+        }
+      } catch (error) {
+        // Skip tables that can't be processed
+        console.log(chalk.yellow(`  ⚠ Could not process FK for ${tableName}: ${error}`));
+      }
+    }
+
+    return Array.from(tablesToProcess);
+  }
+
+  /**
+   * Warns about missing foreign key tables
+   */
+  private warnMissingForeignKeyTables(
+    tableInfo: TableInfo,
+    processedTables: Set<string>,
+    allTables: string[]
+  ): void {
+    for (const fk of tableInfo.foreignKeys) {
+      const referencedFullName = `${tableInfo.schema}.${fk.referencedTable}`;
+      
+      if (!allTables.includes(referencedFullName) && !processedTables.has(referencedFullName)) {
+        console.log(chalk.yellow(
+          `  ⚠ Warning: ${tableInfo.schema}.${tableInfo.name} references ${referencedFullName} via ${fk.columnName},\n` +
+          `    but ${referencedFullName} is not in the generation set.\n` +
+          `    Tip: Add "${referencedFullName}" to your tables list or enable autoIncludeForeignKeyTables.`
+        ));
+      }
+    }
   }
 
   /**

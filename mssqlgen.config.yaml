@@ -44,4 +44,5 @@ generation:
   features:
     generateMutations: true
     generateRelationships: true
+    autoIncludeForeignKeyTables: true
     includePagination: false

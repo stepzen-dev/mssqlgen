@@ -156,6 +156,7 @@ generation:
   features:
     generateMutations: true
     generateRelationships: true
+    autoIncludeForeignKeyTables: false
     includePagination: false
 `;
 

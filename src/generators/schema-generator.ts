@@ -1,11 +1,11 @@
-import { TableInfo, GraphQLType, GraphQLField, GraphQLQuery } from '../types';
+import { TableInfo, GraphQLType, GraphQLField, GraphQLQuery, ForeignKeyInfo } from '../types';
 import { TypeMapper } from '../utils/type-mapper';
 
 export class SchemaGenerator {
   /**
    * Generates a GraphQL type definition from table info
    */
-  generateType(table: TableInfo): GraphQLType {
+  generateType(table: TableInfo, generateRelationships: boolean = false): GraphQLType {
     const typeName = TypeMapper.toPascalCase(table.name);
     
     const fields: GraphQLField[] = table.columns.map(column => ({
@@ -14,6 +14,33 @@ export class SchemaGenerator {
       nullable: column.isNullable,
       description: undefined,
     }));
+
+    // Add foreign key relationship fields if enabled
+    if (generateRelationships && table.foreignKeys.length > 0) {
+      table.foreignKeys.forEach(fk => {
+        const relatedTypeName = TypeMapper.toPascalCase(fk.referencedTable);
+        
+        // Generate field name: <fkColumnWithoutId><TypeName>
+        // e.g., lasteditedby + People = lasteditedbyPeople
+        let fkFieldBase = TypeMapper.toCamelCase(fk.columnName);
+        
+        // Remove common ID suffixes
+        fkFieldBase = fkFieldBase
+          .replace(/Id$/, '')
+          .replace(/ID$/, '')
+          .replace(/_id$/, '')
+          .replace(/_ID$/, '');
+        
+        const fieldName = fkFieldBase + relatedTypeName;
+        
+        fields.push({
+          name: fieldName,
+          type: relatedTypeName,
+          nullable: true,
+          description: undefined,
+        });
+      });
+    }
 
     return {
       name: typeName,
@@ -64,11 +91,16 @@ export class SchemaGenerator {
   /**
    * Generates the GraphQL schema file content
    */
-  generateSchemaFile(type: GraphQLType, queries: GraphQLQuery[], databaseName: string): string {
+  generateSchemaFile(
+    type: GraphQLType, 
+    queries: GraphQLQuery[], 
+    databaseName: string,
+    foreignKeys: ForeignKeyInfo[] = []
+  ): string {
     let schema = '';
 
     // Add type definition
-    schema += this.generateTypeDefinition(type);
+    schema += this.generateTypeDefinition(type, foreignKeys);
     schema += '\n\n';
 
     // Add Query type
@@ -84,7 +116,7 @@ export class SchemaGenerator {
   /**
    * Generates a GraphQL type definition string
    */
-  private generateTypeDefinition(type: GraphQLType): string {
+  private generateTypeDefinition(type: GraphQLType, foreignKeys: ForeignKeyInfo[] = []): string {
     let def = '';
     
     if (type.description) {
@@ -98,7 +130,25 @@ export class SchemaGenerator {
         def += `  """${field.description}"""\n`;
       }
       const fieldType = TypeMapper.formatFieldType(field.type, field.nullable);
-      def += `  ${field.name}: ${fieldType}\n`;
+      def += `  ${field.name}: ${fieldType}`;
+      
+      // Add @materializer directive for foreign key fields
+      // Match by checking if field name ends with the referenced type name
+      const fk = foreignKeys.find(fk => {
+        const typeName = TypeMapper.toPascalCase(fk.referencedTable);
+        return field.name.endsWith(typeName) && field.type === typeName;
+      });
+      
+      if (fk) {
+        const queryName = TypeMapper.getSingleQueryName(fk.referencedTable);
+        const fkColumnCamel = TypeMapper.toCamelCase(fk.columnName);
+        def += `\n    @materializer(\n`;
+        def += `      query: "${queryName}"\n`;
+        def += `      arguments: [{name: "${TypeMapper.toCamelCase(fk.referencedColumn)}", field: "${fkColumnCamel}"}]\n`;
+        def += `    )`;
+      }
+      
+      def += '\n';
     });
     
     def += '}';
@@ -157,12 +207,15 @@ export class SchemaGenerator {
   generateIndexFile(tableNames: string[]): string {
     let content = '# StepZen Schema Index\n\n';
     
-    tableNames.forEach(tableName => {
+    content += 'schema @sdl(files: [\n';
+    tableNames.forEach((tableName, index) => {
       const fileName = tableName.toLowerCase();
-      content += `schema @sdl(files: ["types/${fileName}.graphql"]) {\n`;
-      content += '  query: Query\n';
-      content += '}\n\n';
+      const comma = index < tableNames.length - 1 ? ',' : '';
+      content += `  "types/${fileName}.graphql"${comma}\n`;
     });
+    content += ']) {\n';
+    content += '  query: Query\n';
+    content += '}\n';
     
     return content;
   }
