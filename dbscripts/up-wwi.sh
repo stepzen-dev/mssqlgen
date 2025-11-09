@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- Detect container runtime (podman or docker) ---
+if command -v podman &> /dev/null; then
+  CONTAINER_CMD="podman"
+elif command -v docker &> /dev/null; then
+  CONTAINER_CMD="docker"
+else
+  echo "ERROR: Neither podman nor docker found. Please install one of them."
+  exit 1
+fi
+echo "=> Using container runtime: $CONTAINER_CMD"
+
 # --- Settings you might tweak ---
 CONTAINER_NAME="mssql-wwi"
 SA_PASSWORD="${SA_PASSWORD:-Str0ng!Passw0rd}"   # override by exporting SA_PASSWORD
@@ -12,13 +23,13 @@ BAK_URL="https://github.com/Microsoft/sql-server-samples/releases/download/wide-
 TOOLS="/opt/mssql-tools18/bin/sqlcmd"
 
 echo "=> Cleaning any prior container..."
-podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+$CONTAINER_CMD rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
 echo "=> Pulling image $MSSQL_IMAGE ..."
-podman pull "$MSSQL_IMAGE" >/dev/null
+$CONTAINER_CMD pull "$MSSQL_IMAGE" >/dev/null
 
 echo "=> Starting SQL Server container ($CONTAINER_NAME) on port $HOST_PORT ..."
-podman run -d --name "$CONTAINER_NAME" \
+$CONTAINER_CMD run -d --name "$CONTAINER_NAME" \
   -e "ACCEPT_EULA=Y" \
   -e "MSSQL_SA_PASSWORD=$SA_PASSWORD" \
   -e "MSSQL_PID=$MSSQL_PID" \
@@ -28,7 +39,7 @@ podman run -d --name "$CONTAINER_NAME" \
 # Wait for SQL to accept connections
 echo -n "=> Waiting for SQL Server to be ready"
 for i in {1..60}; do
-  if podman exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
+  if $CONTAINER_CMD exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
     echo -e "\n=> SQL Server is ready."
     break
   fi
@@ -45,18 +56,18 @@ else
 fi
 
 echo "=> Copying backup into container ..."
-podman exec "$CONTAINER_NAME" bash -lc "mkdir -p /var/opt/mssql/backup"
-podman cp "$BAK_LOCAL" "$CONTAINER_NAME:/var/opt/mssql/backup/wwi.bak"
+$CONTAINER_CMD exec "$CONTAINER_NAME" bash -lc "mkdir -p /var/opt/mssql/backup"
+$CONTAINER_CMD cp "$BAK_LOCAL" "$CONTAINER_NAME:/var/opt/mssql/backup/wwi.bak"
 
 echo "=> Discovering logical file names (RESTORE FILELISTONLY) ..."
-podman exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C \
+$CONTAINER_CMD exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C \
   -Q 'RESTORE FILELISTONLY FROM DISK = "/var/opt/mssql/backup/wwi.bak"'
 
 # Typical logical names for WWI (covers Full/Standard builds):
 #   WWI_Primary, WWI_UserData, WWI_Log, WWI_InMemory_Data_1
-# We’ll attempt a restore with those names.
+# We'll attempt a restore with those names.
 echo "=> Restoring database WideWorldImporters ..."
-podman exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C -Q "
+$CONTAINER_CMD exec "$CONTAINER_NAME" $TOOLS -S localhost -U sa -P "$SA_PASSWORD" -C -Q "
 RESTORE DATABASE WideWorldImporters
 FROM DISK = '/var/opt/mssql/backup/wwi.bak'
 WITH MOVE 'WWI_Primary'          TO '/var/opt/mssql/data/WideWorldImporters.mdf',
