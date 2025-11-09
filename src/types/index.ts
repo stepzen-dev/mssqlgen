@@ -24,7 +24,18 @@ export interface GenerationConfig {
     generateMutations?: boolean;
     generateRelationships?: boolean;
     autoIncludeForeignKeyTables?: boolean;
-    includePagination?: boolean;
+    filtering?: {
+      enabled?: boolean;
+      tables?: string[];
+      operators?: string[];
+      enableLogicalOps?: boolean;
+      useShorthands?: boolean;
+    };
+    pagination?: {
+      enabled?: boolean;
+      defaultPageSize?: number;
+      tables?: string[];
+    };
   };
 }
 
@@ -49,6 +60,7 @@ export interface ColumnInfo {
 export interface ForeignKeyInfo {
   constraintName: string;
   columnName: string;
+  referencedSchema: string;
   referencedTable: string;
   referencedColumn: string;
 }

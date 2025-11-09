@@ -1,5 +1,6 @@
 import { DatabaseConnector } from './database';
 import { SchemaGenerator } from '../generators/schema-generator';
+import { FilterGenerator } from '../generators/filter-generator';
 import { FileWriter } from '../utils/file-writer';
 import { Config, TableInfo } from '../types';
 import chalk from 'chalk';
@@ -8,12 +9,14 @@ import ora from 'ora';
 export class MSSQLSchemaGenerator {
   private db: DatabaseConnector;
   private schemaGen: SchemaGenerator;
+  private filterGen: FilterGenerator;
   private config: Config;
 
   constructor(config: Config) {
     this.config = config;
     this.db = new DatabaseConnector(config.database);
     this.schemaGen = new SchemaGenerator();
+    this.filterGen = new FilterGenerator();
   }
 
   /**
@@ -74,10 +77,28 @@ export class MSSQLSchemaGenerator {
           const generateRelationships = this.config.generation.features?.generateRelationships ?? false;
           const graphqlType = this.schemaGen.generateType(tableInfo, generateRelationships);
 
+          // Check if filtering is enabled for this table
+          const filteringEnabled = this.config.generation.features?.filtering?.enabled ?? false;
+          const filterTables = this.config.generation.features?.filtering?.tables ?? [];
+          const enableFiltering = filteringEnabled && 
+            this.filterGen.shouldEnableFiltering(tableName, filterTables);
+
+          // Generate filter type if filtering is enabled
+          let filterType: string | undefined;
+          if (enableFiltering) {
+            const filterConfig = {
+              operators: this.config.generation.features?.filtering?.operators ?? ['eq', 'ne', 'lt', 'gt', 'le', 'ge'],
+              enableLogicalOps: this.config.generation.features?.filtering?.enableLogicalOps ?? true,
+              useShorthands: this.config.generation.features?.filtering?.useShorthands ?? true,
+            };
+            filterType = this.filterGen.generateTableFilterType(tableInfo, filterConfig);
+          }
+
           // Generate queries
           const queries = this.schemaGen.generateQueries(
             tableInfo,
-            this.config.database.database
+            this.config.database.database,
+            enableFiltering
           );
 
           // Generate schema file content
@@ -85,7 +106,8 @@ export class MSSQLSchemaGenerator {
             graphqlType,
             queries,
             this.config.database.database,
-            generateRelationships ? tableInfo.foreignKeys : []
+            generateRelationships ? tableInfo.foreignKeys : [],
+            filterType
           );
 
           // Write schema file
@@ -103,6 +125,25 @@ export class MSSQLSchemaGenerator {
           spinner.fail(`Failed to process ${tableName}: ${error}`);
           console.error(chalk.red(`Error details: ${error}`));
         }
+      }
+
+      // Generate shared filter types if filtering is enabled
+      const filteringEnabled = this.config.generation.features?.filtering?.enabled ?? false;
+      if (filteringEnabled) {
+        spinner.start('Generating shared filter types...');
+        const filterConfig = {
+          operators: this.config.generation.features?.filtering?.operators ?? ['eq', 'ne', 'lt', 'gt', 'le', 'ge'],
+          enableLogicalOps: this.config.generation.features?.filtering?.enableLogicalOps ?? true,
+          useShorthands: this.config.generation.features?.filtering?.useShorthands ?? true,
+        };
+        const sharedFilters = this.filterGen.generateSharedFilterTypes(filterConfig);
+        FileWriter.writeSchemaFile(
+          this.config.generation.outputDir,
+          'filters',
+          sharedFilters
+        );
+        processedTables.push('filters');
+        spinner.succeed('Generated shared filter types');
       }
 
       // Generate index.graphql
@@ -218,7 +259,7 @@ export class MSSQLSchemaGenerator {
         const tableInfo = await this.db.getTableInfo(table, schema);
         
         for (const fk of tableInfo.foreignKeys) {
-          const referencedFullName = `${schema}.${fk.referencedTable}`;
+          const referencedFullName = `${fk.referencedSchema}.${fk.referencedTable}`;
           
           if (!tablesToProcess.has(referencedFullName)) {
             // Check if the referenced table exists in the database
@@ -248,7 +289,7 @@ export class MSSQLSchemaGenerator {
     allTables: string[]
   ): void {
     for (const fk of tableInfo.foreignKeys) {
-      const referencedFullName = `${tableInfo.schema}.${fk.referencedTable}`;
+      const referencedFullName = `${fk.referencedSchema}.${fk.referencedTable}`;
       
       if (!allTables.includes(referencedFullName) && !processedTables.has(referencedFullName)) {
         console.log(chalk.yellow(

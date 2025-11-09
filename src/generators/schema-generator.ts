@@ -52,17 +52,26 @@ export class SchemaGenerator {
   /**
    * Generates GraphQL queries for a table
    */
-  generateQueries(table: TableInfo, databaseName: string): GraphQLQuery[] {
+  generateQueries(
+    table: TableInfo, 
+    databaseName: string,
+    enableFiltering: boolean = false
+  ): GraphQLQuery[] {
     const queries: GraphQLQuery[] = [];
     const typeName = TypeMapper.toPascalCase(table.name);
     const primaryKey = table.primaryKeys[0]; // Assuming single primary key for now
 
     // List query (get all records)
+    // For list queries, store just the table name - will use 'table' argument
+    const listQueryArgs = enableFiltering 
+      ? [{ name: 'filter', type: `${typeName}Filter`, required: false }]
+      : [];
+    
     queries.push({
       name: TypeMapper.getListQueryName(table.name),
       returnType: `[${typeName}]`,
-      arguments: [],
-      dbQuery: `SELECT * FROM ${table.schema}.${table.name}`,
+      arguments: listQueryArgs,
+      dbQuery: `${table.schema}.${table.name}`,  // Just table name for 'table' argument
     });
 
     // Single record query (by primary key)
@@ -95,9 +104,16 @@ export class SchemaGenerator {
     type: GraphQLType, 
     queries: GraphQLQuery[], 
     databaseName: string,
-    foreignKeys: ForeignKeyInfo[] = []
+    foreignKeys: ForeignKeyInfo[] = [],
+    filterType?: string
   ): string {
     let schema = '';
+
+    // Add filter input type if provided
+    if (filterType) {
+      schema += filterType;
+      schema += '\n';
+    }
 
     // Add type definition
     schema += this.generateTypeDefinition(type, foreignKeys);
@@ -106,7 +122,9 @@ export class SchemaGenerator {
     // Add Query type
     schema += 'type Query {\n';
     queries.forEach(query => {
-      schema += this.generateQueryDefinition(query, databaseName, type.name);
+      // Use table argument for list queries (simple SELECT *), query argument for specific queries
+      const useTableArg = query.returnType.startsWith('[') && query.arguments.length <= 1;
+      schema += this.generateQueryDefinition(query, databaseName, type.name, useTableArg);
     });
     schema += '}\n';
 
@@ -159,7 +177,12 @@ export class SchemaGenerator {
   /**
    * Generates a query definition with @dbquery directive
    */
-  private generateQueryDefinition(query: GraphQLQuery, databaseName: string, typeName: string): string {
+  private generateQueryDefinition(
+    query: GraphQLQuery, 
+    databaseName: string, 
+    typeName: string,
+    useTableArg: boolean = false
+  ): string {
     let def = '  ';
     
     // Query signature
@@ -181,9 +204,16 @@ export class SchemaGenerator {
     // Add @dbquery directive
     def += '\n    @dbquery(\n';
     def += `      type: "mssql"\n`;
-    def += `      query: """\n`;
-    def += `        ${query.dbQuery}\n`;
-    def += `      """\n`;
+    
+    // Use table argument for simple queries, query argument for complex ones
+    if (useTableArg) {
+      def += `      table: "${query.dbQuery}"\n`;
+    } else {
+      def += `      query: """\n`;
+      def += `        ${query.dbQuery}\n`;
+      def += `      """\n`;
+    }
+    
     def += `      configuration: "mssql_config"\n`;
     def += '    )\n';
     

@@ -45,4 +45,20 @@ generation:
     generateMutations: true
     generateRelationships: true
     autoIncludeForeignKeyTables: true
-    includePagination: false
+    
+    # Filtering configuration
+    filtering:
+      enabled: true
+      tables:
+        - "Sales.*"
+        - "Warehouse.*"
+        - "Application.*"
+      operators: ["eq", "ne", "lt", "gt", "le", "ge", "like", "ilike"]
+      enableLogicalOps: true
+      useShorthands: true
+    
+    # Pagination configuration (future)
+    pagination:
+      enabled: false
+      defaultPageSize: 10
+      tables: []

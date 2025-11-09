@@ -157,7 +157,20 @@ generation:
     generateMutations: true
     generateRelationships: true
     autoIncludeForeignKeyTables: false
-    includePagination: false
+    
+    # Filtering configuration
+    filtering:
+      enabled: false
+      tables: []  # Empty means all tables (e.g., ["Sales.*", "Warehouse.*"])
+      operators: ["eq", "ne", "lt", "gt", "le", "ge", "like", "ilike"]
+      enableLogicalOps: true
+      useShorthands: true
+    
+    # Pagination configuration
+    pagination:
+      enabled: false
+      defaultPageSize: 10
+      tables: []
 `;
 
     fs.writeFileSync(outputPath, sampleConfig, 'utf-8');

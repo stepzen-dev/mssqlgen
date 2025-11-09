@@ -182,6 +182,7 @@ export class DatabaseConnector {
       SELECT
         fk.name as constraintName,
         c.name as columnName,
+        rs.name as referencedSchema,
         rt.name as referencedTable,
         rc.name as referencedColumn
       FROM sys.foreign_keys fk
@@ -190,6 +191,7 @@ export class DatabaseConnector {
       INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
       INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
       INNER JOIN sys.tables rt ON fkc.referenced_object_id = rt.object_id
+      INNER JOIN sys.schemas rs ON rt.schema_id = rs.schema_id
       INNER JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
       WHERE t.name = @tableName
         AND s.name = @schema
@@ -203,6 +205,7 @@ export class DatabaseConnector {
     return result.recordset.map((row: any) => ({
       constraintName: row.constraintName,
       columnName: row.columnName,
+      referencedSchema: row.referencedSchema,
       referencedTable: row.referencedTable,
       referencedColumn: row.referencedColumn,
     }));
