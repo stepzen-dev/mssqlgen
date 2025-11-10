@@ -47,3 +47,4 @@ stepzen/
 # database files
 dbscripts/*.bak
 
+./mssqlgen.config.yaml
