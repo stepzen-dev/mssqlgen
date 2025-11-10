@@ -321,6 +321,6 @@ export class MSSQLSchemaGenerator {
    */
   private buildConnectionString(): string {
     const { server, database, user, password, port } = this.config.database;
-    return `mssql://${user}:${password}@${server}:${port || 1433}/${database}`;
+    return `sqlserver://${user}:${password}@${server}:${port || 1433}?database=${database}`;
   }
 }

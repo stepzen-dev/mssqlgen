@@ -62,7 +62,7 @@ export class SchemaGenerator {
     const primaryKey = table.primaryKeys[0]; // Assuming single primary key for now
 
     // List query (get all records)
-    // For list queries, store just the table name - will use 'table' argument
+    // For list queries, store just the table name (without schema) - schema will be separate parameter
     const listQueryArgs = enableFiltering 
       ? [{ name: 'filter', type: `${typeName}Filter`, required: false }]
       : [];
@@ -71,7 +71,8 @@ export class SchemaGenerator {
       name: TypeMapper.getListQueryName(table.name),
       returnType: `[${typeName}]`,
       arguments: listQueryArgs,
-      dbQuery: `${table.schema}.${table.name}`,  // Just table name for 'table' argument
+      dbQuery: table.name,  // Just table name, schema will be separate
+      schema: table.schema,
     });
 
     // Single record query (by primary key)
@@ -90,6 +91,7 @@ export class SchemaGenerator {
             },
           ],
           dbQuery: `SELECT * FROM ${table.schema}.${table.name} WHERE ${primaryKey} = ?`,
+          schema: table.schema,
         });
       }
     }
@@ -204,6 +206,11 @@ export class SchemaGenerator {
     // Add @dbquery directive
     def += '\n    @dbquery(\n';
     def += `      type: "mssql"\n`;
+    
+    // Add schema parameter if available
+    if (query.schema) {
+      def += `      schema: "${query.schema}"\n`;
+    }
     
     // Use table argument for simple queries, query argument for complex ones
     if (useTableArg) {

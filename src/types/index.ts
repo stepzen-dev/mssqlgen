@@ -95,6 +95,7 @@ export interface GraphQLQuery {
   returnType: string;
   arguments: Array<{ name: string; type: string; required: boolean }>;
   dbQuery: string;
+  schema?: string;
 }
 
 export interface StepZenSchema {
